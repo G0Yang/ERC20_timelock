@@ -1,0 +1,18 @@
+{
+  "name": "FRR",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "test": "truffle test",
+    "upload:dev": "truffle compile --network development; truffle migrate --network development",
+    "compile:dev": "truffle compile --network development",
+    "migrate:dev": "truffle migrate --network development",
+    "upload:mainnet": "truffle compile --network mainnet; truffle migrate --network mainnet",
+    "compile:mainnet": "truffle compile --network mainnet",
+    "migrate:mainnet": "truffle migrate --network mainnet",
+    "clean": "rm -fr ./build ./node_modules"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "4.3.3"
+  }
+}
