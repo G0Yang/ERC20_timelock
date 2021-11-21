@@ -14,7 +14,7 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
         uint256 _amount;
     }
 
-    mapping(address => LockInfo[]) public timelockList;
+    mapping(address => LockInfo[]) public timeLockList;
     mapping(address => uint256) public lockedBalance;
     mapping(address => bool) public frozenAccount;
     mapping(address => bool) public isAdmin;
@@ -25,6 +25,7 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
     event Freeze(address indexed holder);
     event Unfreeze(address indexed holder);
     event Lock(address indexed holder, uint256 value, uint256 releaseTime);
+    event AutoUnlock(address indexed holder, uint256 releaseTime);
     event Unlock(address indexed holder, uint256 value);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -46,6 +47,14 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
         _mint(msg.sender, 100 * (10 ** decimals()));
         isAdmin[msg.sender] = true;
         owner = msg.sender;
+    }
+
+    function getTimeLockLength(address holder) public view returns (uint256) {
+        return timeLockList[holder].length;
+    }
+
+    function getTime() public view returns (uint256) {
+        return block.timestamp;
     }
 
     function transferOwnership(address newOwner) public onlyOwner {
@@ -93,8 +102,6 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
     }
 
     function lock(address holder, uint256 value, uint256 releaseTime) public onlyAdmin returns (bool) {
-        require(balanceOf(holder) - lockedBalance[holder] >= value, "There is not enough balance of holder.");
-        require(releaseTime >= block.timestamp, "releaseTime is past current time");
         _lock(holder, value, releaseTime);
         return true;
     }
@@ -107,31 +114,32 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
     }
 
     function unlock(address holder, uint256 idx) public onlyAdmin returns (bool) {
-        require(timelockList[holder].length > idx, "There is not lock info.");
+        require(timeLockList[holder].length > idx, "There is not lock info.");
         _unlock(holder, idx);
         return true;
     }
 
     function _lock(address holder, uint256 value, uint256 releaseTime) internal returns (bool) {
         require(balanceOf(holder) - lockedBalance[holder] >= value, "There is not enough balance of holder.");
+        require(releaseTime >= block.timestamp, "releaseTime is past current time");
         lockedBalance[holder] = SafeMath.add(value, lockedBalance[holder]);
-        timelockList[holder].push(LockInfo(releaseTime, value));
+        timeLockList[holder].push(LockInfo(releaseTime, value));
         emit Lock(holder, value, releaseTime);
         return true;
     }
 
     function _unlock(address holder, uint256 idx) internal returns (bool) {
-        LockInfo storage lockinfo = timelockList[holder][idx];
-        uint256 releaseAmount = lockinfo._amount;
-        if(timelockList[holder].length > 1){
-            if(timelockList[holder].length - 1 == idx){
-                timelockList[holder].pop();
+        LockInfo storage lockInfo = timeLockList[holder][idx];
+        uint256 releaseAmount = lockInfo._amount;
+        if(timeLockList[holder].length > 1){
+            if(timeLockList[holder].length - 1 == idx){
+                timeLockList[holder].pop();
             }else{
-                timelockList[holder][idx] = timelockList[holder][timelockList[holder].length - 1];
-                timelockList[holder].pop();
+                timeLockList[holder][idx] = timeLockList[holder][timeLockList[holder].length - 1];
+                timeLockList[holder].pop();
             }
         }else{
-            delete timelockList[holder];
+            delete timeLockList[holder];
         }
         lockedBalance[holder] = SafeMath.sub(lockedBalance[holder], releaseAmount);
         emit Unlock(holder, releaseAmount);
@@ -139,29 +147,37 @@ contract FRR is ERC20, ERC20Pausable, ERC20Burnable {
     }
 
     function _autoUnlock(address holder) internal returns (bool) {
-        for (uint256 idx = 0; idx < timelockList[holder].length; idx++) {
-            if (timelockList[holder][idx]._releaseTime <= block.timestamp) {
-                if (_unlock(holder, idx)) {
-                    idx -= 1;
-                }
+        for (uint256 idx = 0; idx < timeLockList[msg.sender].length; idx++) {
+            if (timeLockList[holder][idx]._releaseTime < block.timestamp) {
+                _unlock(holder, idx);
+                idx--;
+                emit AutoUnlock(msg.sender, block.timestamp);
             }
         }
         return true;
     }
 
     function transfer(address to, uint256 value) public notFrozen(msg.sender) whenNotPaused override returns (bool) {
-        if (timelockList[msg.sender].length > 0) {
+        if(timeLockList[msg.sender].length > 0){
             _autoUnlock(msg.sender);
         }
-        require(balanceOf(msg.sender) - lockedBalance[msg.sender] >= value);
+        if(balanceOf(msg.sender) >= lockedBalance[msg.sender]){
+            require(balanceOf(msg.sender) - lockedBalance[msg.sender] >= value);
+        } else {
+            require(lockedBalance[msg.sender] - balanceOf(msg.sender) >= value);
+        }
         return super.transfer(to, value);
     }
 
     function transferFrom(address from, address to, uint256 value) public notFrozen(from) whenNotPaused override returns (bool) {
-        if (timelockList[from].length > 0) {
-            _autoUnlock(from);
+        if(timeLockList[msg.sender].length > 0){
+            _autoUnlock(msg.sender);
         }
-        require(balanceOf(msg.sender) - lockedBalance[msg.sender] >= value);
+        if(balanceOf(msg.sender) >= lockedBalance[msg.sender]){
+            require(balanceOf(msg.sender) - lockedBalance[msg.sender] >= value);
+        } else {
+            require(lockedBalance[msg.sender] - balanceOf(msg.sender) >= value);
+        }
         return super.transferFrom(from, to, value);
     }
 
